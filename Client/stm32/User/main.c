@@ -18,6 +18,9 @@ static void NVIC_Configuration(void) {
     NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
+    NVIC_InitStructure.NVIC_IRQChannel = SDIO_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_Init(&NVIC_InitStructure);  
 
     // 配置USART1接收中断
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0);
@@ -59,26 +62,7 @@ static void NVIC_Configuration(void) {
     NVIC_Init(&NVIC_InitStructure);
 }
 
-/**
- * @brief 挂载设备（如SD卡）
- * 
- * @param equipment 设备的路径
- * @return FRESULT 文件系统的状态码
- */
-FRESULT Mount_device(const TCHAR *equipment) {
-    FRESULT state;
 
-    // 尝试挂载文件系统
-    state = f_mount(&fs, equipment, 1);
-
-    switch (state) {
-        case FR_NO_FILESYSTEM:
-            // 如果没有文件系统，尝试创建文件系统
-            return f_mkfs(equipment, 0, 0);
-        default:
-            return state;
-    }
-}
 /**
  * @brief 初始化USART1
  * 
@@ -207,8 +191,6 @@ void GPIO_Initialization(void) {
     GPIO_Init(GPIOA, &GPIO_init);
 }
 
-
-
 /**
  * @brief 将日志信息记录到文件或通过串口发送
  *
@@ -218,7 +200,7 @@ void GPIO_Initialization(void) {
  * @param ... 可变参数列表，用于填充 log_detail 中的格式化字符串
  */
 void STM_LOG(const char* log_category, const char* log_process, const char* log_detail, ...) {
-    char LOG[64];  // 存储格式化后的日志字符串
+    char LOG[64],OUT_LOG[128];  // 存储格式化后的日志字符串
     va_list args;  // 用于处理可变参数列表
     va_start(args, log_detail);  // 初始化可变参数列表
 
@@ -226,21 +208,20 @@ void STM_LOG(const char* log_category, const char* log_process, const char* log_
     vsnprintf(LOG, sizeof(LOG), log_detail, args);
 
     va_end(args);  // 清理可变参数列表
-
+    sprintf(OUT_LOG,"%s:(%s)%s\r\n\0",log_category,log_process,LOG);
     #if STM_SD_LOG
         // 如果定义了 STM_SD_LOG，则将日志写入SD卡文件
         UINT i;
-        f_opendir(&dir, "0:");
-        f_open(&fnew, "log.txt", FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
-        f_lseek(&fnew, f_size(&fnew));
-        f_write(&fnew, LOG, sizeof(LOG), &i);
-        f_close(&fnew);
+        sta=f_opendir(&dir, "0:");
+        sta=f_open(&fnew, "log.txt", FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
+        sta=f_lseek(&fnew, f_size(&fnew));
+        sta=f_write(&fnew, OUT_LOG, sizeof(OUT_LOG), &i);
+        sta=f_close(&fnew);
     #else
         // 如果未定义 STM_SD_LOG，则通过串口发送日志信息
-        Usart_SendString(USART1, LOG);
+        Usart_SendString(USART1, OUT_LOG);
     #endif
 }
-
 
 /**
  * @brief 发送单个字节到 USART
@@ -327,23 +308,159 @@ ESP ESP_AT(unsigned int tame, const char* AT) {
     }
 }
 
-
-void ESP_Default(void)
-{
-    STM_LOG("I","ESP","");
+    
+/**
+ * @brief 处理 ESP 模块的错误状态并进行相应的日志记录
+ * 
+ * @param ERROR_LOG ESP 模块的错误状态
+ */
+void ESP_ERROR_LOG(ESP ERROR_LOG) {
+    #define ESP_LOG_PREFIX "ESP"
+    switch (ERROR_LOG) {
+        case ESP_OK:
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,5,"OK   ",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_WIFI_OK:
+            // 成功连接到 WiFi
+            STM_LOG("I", ESP_LOG_PREFIX, "Successfully connected to WiFi");
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,21,"OK   ",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_Error:
+            // ESP 模块错误
+            STM_LOG("E", ESP_LOG_PREFIX, "Module error");
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,5,"ERROR",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_TCPv6Error:
+            // 未获取到或不存在 TCPv6 连接
+            STM_LOG("E", ESP_LOG_PREFIX, "TCPv6 not obtained or does not exist");
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,37,"ERROR",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_CIPMUXError:
+            // 启动多连接失败
+            STM_LOG("E", ESP_LOG_PREFIX, "Failed to start multiple connections");
+            break;
+        case ESP_Connect:
+            // 连接成功建立
+            STM_LOG("I", ESP_LOG_PREFIX, "Connection successfully established");
+            break;
+        case ESP_No_Connection:
+            // 未建立连接
+            STM_LOG("W", ESP_LOG_PREFIX, "No connection established");
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,21,"ERROR",RED,BLACK,16,0);
+            LCD_ShowString(5+8*12,32,"ERROR",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_DISK_ERR:
+        case ESP_ReceiveError:
+        case ESP_Noreply:
+        case ESP_empty:
+            // ESP 磁盘/接收/无响应/空状态错误
+            STM_LOG("E", ESP_LOG_PREFIX, "Error: %d", ERROR_LOG);
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,5,"ERROR",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_IPV6Error:
+            // 未获取到或不存在 IPV6 连接
+            STM_LOG("E", ESP_LOG_PREFIX, "IPv6 not obtained or does not exist");
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,37,"ERROR",RED,BLACK,16,0);
+            #endif
+            break;
+        case ESP_IPV6_OK:
+            // 成功获取 IPV6 连接
+            STM_LOG("I", ESP_LOG_PREFIX, "IPv6 obtained");
+            #if STM_LCD 
+            LCD_ShowString(5+8*12,37,"OK   ",RED,BLACK,16,0);
+            #endif
+            break;
+        default:
+            // 未知状态
+            STM_LOG("W", ESP_LOG_PREFIX, "Unknown state: %d", ERROR_LOG);
+             #if STM_LCD 
+            LCD_ShowString(5+8*12,5,"?    ",RED,BLACK,16,0);
+            #endif
+            break;
+    }
 }
+
+
+#if STM_LCD
+
+void STM_LCD_init(void)
+{
+    LCD_Init();
+	LCD_Fill(0,0,LCD_W,LCD_H,BLACK);
+    LCD_RoundedRectangle(0,0,160,64,2,GBLUE);
+    LCD_RoundedRectangle(0,62,160,64,2,GBLUE);
+    LCD_ShowString(5,5,"ESP Status:",RED,BLACK,16,0);
+    LCD_ShowString(5,21,"WiFi Status:",RED,BLACK,16,0);
+    LCD_ShowString(5,37,"IPV6 Status:",RED,BLACK,16,0);
+    LCD_ShowString(15,70,"M1:",RED,BLACK,16,0);
+    LCD_ShowString(15,100,"M2:",RED,BLACK,16,0);
+    LCD_ShowString(90,70,"M3:",RED,BLACK,16,0);
+    LCD_ShowString(90,100,"M4:",RED,BLACK,16,0);
+    return;
+}
+#endif
+
+
+#if STM_SD_LOG
+
+/**
+ * @brief 挂载设备（如SD卡）
+ * 
+ * @param equipment 设备的路径
+ * @return FRESULT 文件系统的状态码
+ */
+FRESULT Mount_device(const TCHAR *equipment) {
+    FRESULT SD_state;
+
+    // 尝试挂载文件系统
+    SD_state = f_mount(&fs, equipment, 1);
+
+    switch (SD_state) {
+        case FR_NO_FILESYSTEM:
+            // 如果没有文件系统，尝试创建文件系统
+            return f_mkfs(equipment, 0, 0);
+        default:
+            return SD_state;
+    }
+}
+#endif
+
+void ESP_Default(void){
+    ESP_ERROR_LOG(ESP_AT(100,AT_AT));
+    ESP_ERROR_LOG(ESP_AT(100,AT_ATE));
+    ESP_ERROR_LOG(ESP_AT(100,AT_SYSSTORE));
+    ESP_ERROR_LOG(ESP_AT(100,AT_CWMODE));
+    ESP_ERROR_LOG(ESP_AT(500,AT_CWSAP));
+
+}
+
+
 int main(void)
 {
-	LCD_Init();
-	LCD_Fill(0,0,LCD_W,LCD_H,BLACK);
 	NVIC_Configuration();
-	Mount_device("0:");
 	GPIO_Initialization();
 	USART_Initialization();
-  STM_LOG("I","TEXT","Hello World !%u",ESP_AT(100,AT_AT));
-	while(1)
-	{
-	}
+    #if STM_SD_LOG
+        Mount_device("0:");
+    #endif
+    #if STM_LCD
+        STM_LCD_init();
+    #endif
+    ESP_Default(); 
+	while(1);
 }
 
 
@@ -367,7 +484,7 @@ void USART1_IRQHandler(void) {
     switch (tx_buffer[0]) {
         case 'O':
             // 发送 "ok" 到 USART1（调试输出）
-            Usart_SendString(USART1, "ok");
+            //Usart_SendString(USART1, "ok");
             tx_buffer[0] = 0x00;
             state = ESP_OK;
             tx_Number = 0;
@@ -376,34 +493,35 @@ void USART1_IRQHandler(void) {
         case 'E':
             // 发送 "ERROR" 到 USART1（调试输出）
             state = ESP_Error;
-            Usart_SendString(USART1, "ERROR");
+            //Usart_SendString(USART1, "ERROR");
             tx_buffer[0] = 0x00;
             tx_Number = 0;
             return;
 
         case '+':
-            // 如果接收到换行符 '\n'
-            if (tx_buffer[tx_Number] == '\n') {
-                tx_Number = 0;
-                // 复制数据到 Read_data，并清空 tx_buffer
-                strcpy((char *)Read_data, (char *)tx_buffer);
-                memset(tx_buffer, 0, tx_Number);
-                // 发送 Read_data 到 USART1
-                Usart_SendString(USART1, (char *)Read_data);
+            // 如果没接收到换行符 '\n'
+            if (tx_buffer[tx_Number] != '\n') {
+                tx_Number++;
                 return;
             }
-            tx_Number++;
+            tx_Number = 0;
+            // 复制数据到 Read_data，并清空 tx_buffer
+            strcpy((char *)Read_data, (char *)tx_buffer);
+            memset(tx_buffer, 0, tx_Number);
+            // 发送 Read_data 到 USART1
+            Usart_SendString(USART1, (char *)Read_data);
             return;
-
-        default:
+        case '1':
+        case '2':
+        case '3':
+        case '4':
             // 如果接收到 '0', '1', '2', '3', 或 '4'
-            if (tx_buffer[0] == '0' || tx_buffer[0] == '1' || tx_buffer[0] == '2' || tx_buffer[0] == '3' || tx_buffer[0] == '4') {
-                state = ESP_OK;
-                // 执行 ESP_AT 函数，并在串口发送调试信息
-                ESP_AT(10, AT_CIPSTATE);
-                tx_buffer[0] = 0X00;
-                return;
-            }
+            state = ESP_OK;
+            // 执行 ESP_AT 函数，并在串口发送调试信息
+            ESP_AT(10, AT_CIPSTATE);
+            tx_buffer[0] = 0X00;
+            return;
+        default:
             // 重置 tx_Number 为 0，准备处理下一条数据
             tx_Number = 0;
             break;

@@ -16,7 +16,8 @@
 
 #define BUFFER_SIZE  128
 #define MAX_WAIT_CYCLES 10000
-#define STM_SD_LOG 0
+#define STM_SD_LOG 1
+#define STM_LCD 1
 
 typedef enum{
     ESP_OK=0,
@@ -32,7 +33,8 @@ typedef enum{
     ESP_IPV6Error,
     ESP_IPV6_OK,
     ESP_empty,
-    ESP_Not
+    ESP_Not,
+    ESP_RES_OK
 }ESP;
 
 typedef enum{
@@ -65,7 +67,7 @@ ESP state=ESP_Not;
 FRESULT Mount_device(const TCHAR *equipment);
 void STM_LOG(const char* __restrict,const char* __restrict,const char* __restrict,...)__attribute__((__nonnull__(1,2,3)));
 void Usart_SendString( USART_TypeDef * pUSARTx,const char *str);
-
+FRESULT sta;
 
 // 一些常用AT指令的定义
 const char AT_AT[]="AT\r\n";
