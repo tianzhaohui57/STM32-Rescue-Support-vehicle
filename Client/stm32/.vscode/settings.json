@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "stm32_eval_sdio_sd.h": "c",
+        "stdio.h": "c",
+        "limits": "c",
+        "memory": "c",
+        "atomic": "c",
+        "compare": "c",
+        "cstddef": "c",
+        "type_traits": "c",
+        "xmemory": "c",
+        "xstring": "c",
+        "xutility": "c",
+        "iosfwd": "c"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
+}
