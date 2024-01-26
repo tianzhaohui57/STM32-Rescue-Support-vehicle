@@ -88,8 +88,9 @@ const char AT_CIPSERVER_OFF[]="AT+CIPSERVER=0,1\r\n";
 const char AT_CWJAP[]="AT+CWJAP=\"ESP_TZH_W\",\"070330XYX\"\r\n";
 const char AT_CIPSTART[]="AT+CIPSTART=0,\"TCP\",\"192.168.1.1\",3050\r\n";
 const char AT_CIPSEND_S[]="AT+CIPSEND=0,20\r\n";
+const char AT_CWSTATE[]="AT+CWSTATE?\r\n";
 const char Receiving_Terminal[]="[Receiving-Terminal]\r\n";
-
+const char ESP_Reply_CWSTATE[]="+CWSTATE";
 
 #endif
 

@@ -356,7 +356,7 @@ void ESP_ERROR_LOG(ESP ERROR_LOG) {
             STM_LOG("W", ESP_LOG_PREFIX, "No connection established");
             #if STM_LCD 
             LCD_ShowString(5+8*12,21,"ERROR",RED,BLACK,16,0);
-            LCD_ShowString(5+8*12,32,"ERROR",RED,BLACK,16,0);
+            LCD_ShowString(5+8*12,37,"ERROR",RED,BLACK,16,0);
             #endif
             break;
         case ESP_DISK_ERR:
@@ -396,6 +396,10 @@ void ESP_ERROR_LOG(ESP ERROR_LOG) {
 
 #if STM_LCD
 
+/**
+ * @brief 若存在LCD屏幕，则初始化屏幕并绘制
+ * 
+ */
 void STM_LCD_init(void)
 {
     LCD_Init();
@@ -437,14 +441,64 @@ FRESULT Mount_device(const TCHAR *equipment) {
     }
 }
 #endif
-
+/**
+ *   设置ESP32的默认模式
+ *   设置当前参数不保存到Flash
+ *   设置Wi-Fi工作模式
+ *   开启IPv6功能
+ *   禁用DHCP模式
+ *   设置AP模式主机IP地址(192.168.2.1)
+ *   设置SoftAP配置
+ *   设置多连接模式
+ *   开启TCP服务器(3050)
+ *   连接到Wi-Fi网络(ESP_TZH_W)
+ *   连接到指定TCP服务器
+ *   获取PWM值
+ */
 void ESP_Default(void){
-    ESP_ERROR_LOG(ESP_AT(100,AT_AT));
-    ESP_ERROR_LOG(ESP_AT(100,AT_ATE));
-    ESP_ERROR_LOG(ESP_AT(100,AT_SYSSTORE));
-    ESP_ERROR_LOG(ESP_AT(100,AT_CWMODE));
-    ESP_ERROR_LOG(ESP_AT(500,AT_CWSAP));
+    unsigned int timeout=0; // 初始化超时计数器
 
+    // 发送各种AT命令，初始化ESP32模块
+    ESP_ERROR_LOG(ESP_AT(100,AT_AT)); // 发送AT测试命令
+    ESP_ERROR_LOG(ESP_AT(100,AT_ATE)); // 设置AT指令的不回显模式
+    ESP_ERROR_LOG(ESP_AT(100,AT_SYSSTORE)); // 设置当前参数不保存到Flash
+    ESP_ERROR_LOG(ESP_AT(100,AT_CWMODE)); // 设置Wi-Fi工作模式
+    ESP_ERROR_LOG(ESP_AT(100,AT_CIPV6)); // 开启IPv6功能
+    ESP_ERROR_LOG(ESP_AT(100,AT_CWDHCP)); // 禁用DHCP模式
+    ESP_ERROR_LOG(ESP_AT(100,AT_CIPAP)); // 设置AP模式主机IP地址(192.168.2.1)
+    ESP_ERROR_LOG(ESP_AT(500,AT_CWSAP)); // 设置SoftAP配置
+    ESP_ERROR_LOG(ESP_AT(100,AT_CIPMUX)); // 设置多连接模式
+    ESP_ERROR_LOG(ESP_AT(100,AT_CIPSERVER)); // 开启TCP服务器(3050)
+    ESP_ERROR_LOG(ESP_AT(500,AT_CWJAP)); // 连接到Wi-Fi网络(ESP_TZH_W)
+
+    // 延迟1秒
+    delay_ms(1000);
+
+    // 查询Wi-Fi连接状态
+    ESP_AT(500,AT_CWSTATE);
+    while (1){
+        // 检查Wi-Fi连接状态是否成功获取
+        if ((strstr((char*)Read_data,ESP_Reply_CWSTATE)!=NULL)&&(Read_data[9]=='2')){
+            timeout=0; // 重置超时计数器
+            ESP_ERROR_LOG(ESP_WIFI_OK); // 记录Wi-Fi连接成功
+            break; // 退出循环
+        }
+        // 检查超时是否达到10000ms
+        if (timeout==100){
+            timeout=0; // 重置超时计数器
+            ESP_ERROR_LOG(ESP_No_Connection); // 记录Wi-Fi连接失败
+            break; // 退出循环
+        }
+        delay_ms(100); // 等待100毫秒
+        timeout++; // 增加超时计数器
+    }
+
+    // 连接到指定TCP服务器
+    ESP_ERROR_LOG(ESP_AT(100,AT_CIPSTART));
+
+    // 通过USART串口向TCP服务端发送数据
+    Usart_SendString(USART1,AT_CIPSEND_S);
+    Usart_SendString(USART1,Receiving_Terminal);
 }
 
 
@@ -508,8 +562,6 @@ void USART1_IRQHandler(void) {
             // 复制数据到 Read_data，并清空 tx_buffer
             strcpy((char *)Read_data, (char *)tx_buffer);
             memset(tx_buffer, 0, tx_Number);
-            // 发送 Read_data 到 USART1
-            Usart_SendString(USART1, (char *)Read_data);
             return;
         case '1':
         case '2':
