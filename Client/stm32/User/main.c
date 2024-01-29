@@ -68,7 +68,7 @@ static void NVIC_Configuration(void) {
  * 
  * 此函数初始化USART1，并使能USART1的DMA接收和接收中断。
  */
-void USART_Initialization(void) {
+static void USART_Initialization(void) {
     USART_InitTypeDef USARTinit;
 
     // 使能USART1时钟
@@ -158,13 +158,13 @@ void TIM_PWM_Initialization(TIM4567_PWM TIMx) {
 /**
  * @brief 初始化GPIO
  * 
- * 此函数初始化了GPIOB、GPIOE和GPIOA的一些引脚作为输出或复用推挽输出。
+ * 此函数初始化了GPIOB、GPIOD和GPIOA的一些引脚作为输出或复用推挽输出。
  */
-void GPIO_Initialization(void) {
+static void GPIO_Initialization(void) {
     GPIO_InitTypeDef GPIO_init;
 
-    // 使能GPIOB、GPIOE、GPIOA时钟
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB | RCC_APB2Periph_GPIOE | RCC_APB2Periph_GPIOA, ENABLE);
+    // 使能GPIOB、GPIOD、GPIOA时钟
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB | RCC_APB2Periph_GPIOD | RCC_APB2Periph_GPIOA, ENABLE);
 
     // 配置GPIOB输出
     GPIO_init.GPIO_Mode = GPIO_Mode_Out_PP;
@@ -172,11 +172,11 @@ void GPIO_Initialization(void) {
     GPIO_init.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(GPIOB, &GPIO_init);
 
-    // 配置GPIOE输出
+    // 配置GPIOD输出
     GPIO_init.GPIO_Mode = GPIO_Mode_Out_PP;
     GPIO_init.GPIO_Pin = GPIO_Pin_8 | GPIO_Pin_9 | GPIO_Pin_10 | GPIO_Pin_11 | GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14 | GPIO_Pin_15;
     GPIO_init.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_Init(GPIOE, &GPIO_init);
+    GPIO_Init(GPIOD, &GPIO_init);
 
     // 配置GPIOA TX引脚为复用推挽输出
     GPIO_init.GPIO_Mode = GPIO_Mode_AF_PP;
@@ -212,11 +212,11 @@ void STM_LOG(const char* log_category, const char* log_process, const char* log_
     #if STM_SD_LOG
         // 如果定义了 STM_SD_LOG，则将日志写入SD卡文件
         UINT i;
-        sta=f_opendir(&dir, "0:");
-        sta=f_open(&fnew, "log.txt", FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
-        sta=f_lseek(&fnew, f_size(&fnew));
-        sta=f_write(&fnew, OUT_LOG, sizeof(OUT_LOG), &i);
-        sta=f_close(&fnew);
+        f_opendir(&dir, "0:");
+        f_open(&fnew, "log.txt", FA_READ | FA_WRITE | FA_OPEN_ALWAYS);
+        f_lseek(&fnew, f_size(&fnew));
+        f_write(&fnew, OUT_LOG, sizeof(OUT_LOG)-1, &i);
+        f_close(&fnew);
     #else
         // 如果未定义 STM_SD_LOG，则通过串口发送日志信息
         Usart_SendString(USART1, OUT_LOG);
@@ -455,7 +455,7 @@ FRESULT Mount_device(const TCHAR *equipment) {
  *   连接到指定TCP服务器
  *   获取PWM值
  */
-void ESP_Default(void){
+static void ESP_Default(void){
     unsigned int timeout=0; // 初始化超时计数器
 
     // 发送各种AT命令，初始化ESP32模块
@@ -469,14 +469,17 @@ void ESP_Default(void){
     ESP_ERROR_LOG(ESP_AT(500,AT_CWSAP)); // 设置SoftAP配置
     ESP_ERROR_LOG(ESP_AT(100,AT_CIPMUX)); // 设置多连接模式
     ESP_ERROR_LOG(ESP_AT(100,AT_CIPSERVER)); // 开启TCP服务器(3050)
-    ESP_ERROR_LOG(ESP_AT(500,AT_CWJAP)); // 连接到Wi-Fi网络(ESP_TZH_W)
-
-    // 延迟1秒
-    delay_ms(1000);
+    ESP_ERROR_LOG(ESP_AT(50000,AT_CWJAP)); // 连接到Wi-Fi网络(ESP_TZH_W)
+    
+    // 延迟10秒
+    delay_ms(10000);
 
     // 查询Wi-Fi连接状态
-    ESP_AT(500,AT_CWSTATE);
+    //ESP_AT(500,AT_CWSTATE);
     while (1){
+        //Usart_SendString(USART1,AT_CWJAP);
+        //delay_ms(10000);
+        Usart_SendString(USART1,AT_CWSTATE);
         // 检查Wi-Fi连接状态是否成功获取
         if ((strstr((char*)Read_data,ESP_Reply_CWSTATE)!=NULL)&&(Read_data[9]=='2')){
             timeout=0; // 重置超时计数器
@@ -489,21 +492,191 @@ void ESP_Default(void){
             ESP_ERROR_LOG(ESP_No_Connection); // 记录Wi-Fi连接失败
             break; // 退出循环
         }
-        delay_ms(100); // 等待100毫秒
+        delay_ms(1000); // 等待100毫秒
         timeout++; // 增加超时计数器
     }
 
     // 连接到指定TCP服务器
     ESP_ERROR_LOG(ESP_AT(100,AT_CIPSTART));
-
+    delay_ms(100);
     // 通过USART串口向TCP服务端发送数据
     Usart_SendString(USART1,AT_CIPSEND_S);
-    Usart_SendString(USART1,Receiving_Terminal);
+    delay_ms(1000);
+    ESP_AT(100,Receiving_Terminal);
 }
 
+/**
+ * 
+ * @brief 电机控制(M1,M2,M3和M4的正反转和PWM控制)
+ * 
+ * @param motorNumber 电机序号
+ * @param adcValue ADC值
+ * 
+*/
+void controlMotor(M_ID motorNumber, int adcValue) {
 
+    if (adcValue>2){
+        if (adcValue>8) adcValue=8;//最大值为8判断ADC值是否大于8若大于8则设置为8
+        adcValue=adcValue*10;//讲ADC值扩大10倍以便TIM使用
+        switch (motorNumber){//电机序号判断
+        case M1:
+            M1NO2;M1CMDON;//控制电机正转
+            PWM_ADC1=adcValue;//将ADC传入TIM所用的全局变量
+            #if STM_LCD
+            LCD_ShowIntNum(39,70,abs(PWM_ADC1),2,RED,BLACK,16);
+            #endif
+            break;       
+        case M2:
+            M2NO2;
+            M2CMDON;
+            PWM_ADC2=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(39,100,abs(PWM_ADC2),2,RED,BLACK,16);
+            #endif
+            break;        
+        case M3:
+            M3NO2;
+            M3CMDON;
+            PWM_ADC3=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(114,70,abs(PWM_ADC3),2,RED,BLACK,16);
+            #endif
+            break;        
+        case M4:
+            M4NO2;
+            M4CMDON;
+            PWM_ADC4=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(114,100,abs(PWM_ADC4),2,RED,BLACK,16);
+            #endif
+            break;
+        }
+        TIM_PWM_Initialization((TIM4567_PWM)motorNumber);//启动TM定时器
+    }else if (-2>adcValue){//若ADC值小于-2则认为电机反转
+        if (adcValue<-8) adcValue=-8;
+        adcValue=abs(adcValue*10);
+        switch (motorNumber){
+        case 1:
+            M1NO1;
+            M1CMDON;
+            PWM_ADC1=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(39,70,abs(PWM_ADC1),2,RED,BLACK,16);
+            #endif
+            break;        
+        case 2:
+            M2NO1;
+            M2CMDON;
+            PWM_ADC2=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(39,100,abs(PWM_ADC2),2,RED,BLACK,16);
+            #endif
+            break;        
+        case 3:
+            M3NO1;
+            M3CMDON;
+            PWM_ADC3=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(114,70,abs(PWM_ADC3),2,RED,BLACK,16);
+            #endif
+            break;        
+        case 4:
+            M4NO1;
+            M4CMDON;
+            PWM_ADC4=adcValue;
+            #if STM_LCD
+            LCD_ShowIntNum(114,100,abs(PWM_ADC4),2,RED,BLACK,16);
+            #endif
+            break;}
+        TIM_PWM_Initialization((TIM4567_PWM)motorNumber);
+    }else{//只剩下小于2大于-2的ADC值则认为电机停止
+        switch (motorNumber){
+        case 1:
+            M1OFF;
+            TIM_DeInit(TIM4);
+            #if STM_LCD
+            LCD_ShowIntNum(39,70,0,2,RED,BLACK,16);
+            #endif
+            break;        
+        case 2:
+            M2OFF;
+            TIM_DeInit(TIM5);
+            #if STM_LCD
+            LCD_ShowIntNum(39,100,0,2,RED,BLACK,16);
+            #endif
+            break;        
+        case 3:
+            M3OFF;
+            TIM_DeInit(TIM6);
+            #if STM_LCD
+            LCD_ShowIntNum(114,70,0,2,RED,BLACK,16);
+            #endif
+            break;        
+        case 4:
+            M4OFF;
+            TIM_DeInit(TIM7);
+            #if STM_LCD
+            LCD_ShowIntNum(114,100,0,2,RED,BLACK,16);
+            #endif
+            break;
+            }
+    }
+}
+
+/**
+ * 
+ * @brief 控制ESP32连接到新的AP并连接到TCP服务器
+ * 
+ * @param WIFITCP 所要连接的AP的详细信息和TCP服务器详细信息
+ * 
+*/
+void WIFI_Connection(WIFI_TCP_t WIFITCP){
+    char NEW_AP[128],NEW_TCP[64];
+    int timeout;
+    sprintf(NEW_AP,"AT+CWJAP=\"%s\",\"%s\"\r\n",WIFITCP.SSID,WIFITCP.password);
+    ESP_ERROR_LOG(ESP_AT(50000,NEW_AP)); // 连接到Wi-Fi网络
+	// 延迟10秒
+	delay_ms(10000);
+	// 查询Wi-Fi连接状态
+	while (1){
+	Usart_SendString(USART1,AT_CWSTATE);
+	// 检查Wi-Fi连接状态是否成功获取
+	if ((strstr((char*)Read_data,ESP_Reply_CWSTATE)!=NULL)&&(Read_data[9]=='2')){				
+        timeout=0; // 重置超时计数器
+		ESP_ERROR_LOG(ESP_WIFI_OK); // 记录Wi-Fi连接成
+		break; // 退出循
+	}
+	// 检查超时是否达到10000ms
+    if (timeout==100){
+		timeout=0; // 重置超时计数器
+    	ESP_ERROR_LOG(ESP_No_Connection); // 记录Wi-Fi连接失败
+		break; // 退出循环
+	}
+	delay_ms(1000); // 等待100毫秒
+    timeout++; // 增加超时计数器
+	}
+	if (strcmp(WIFITCP.types,"TCPv6")==0){
+		LCD_ShowString(5+8*12,37,"YES",RED,BLACK,16,0);
+	}
+	else if (strcmp(WIFITCP.types,"TCP")==0){
+		LCD_ShowString(5+8*12,37,"NO ",RED,BLACK,16,0);
+	}
+		// 连接到指定TCP服务器
+	sprintf(NEW_TCP,"AT+CIPSTART=0,\"%s\",\"%s\",%s\r\n",WIFITCP.types,WIFITCP.ip,WIFITCP.port);
+	ESP_ERROR_LOG(ESP_AT(100,NEW_TCP));
+	delay_ms(100);
+	// 通过USART串口向TCP服务端发送数据
+	Usart_SendString(USART1,AT_CIPSEND_S);
+	delay_ms(1000);
+	ESP_AT(100,Receiving_Terminal);
+}
+/**
+ * @brief 主函数初始化设备处理UART的数据
+*/
 int main(void)
 {
+    M_ADC_t M_ADC;
+    WIFI_TCP_t WIFITCP;
 	NVIC_Configuration();
 	GPIO_Initialization();
 	USART_Initialization();
@@ -513,8 +686,32 @@ int main(void)
     #if STM_LCD
         STM_LCD_init();
     #endif
-    ESP_Default(); 
-	while(1);
+    ESP_Default();
+	while(1)
+    {
+        if ((strstr((char*)Read_data,"[ADC]")!=NULL)){//当接受到[ADC]命令时更改电机与PWM的状态
+            sscanf((char*)Read_data,"+IPD,%u,%u:[ADC]%d,%d,%d,%d\r\n",
+            &M_ADC.ID,&M_ADC.Data,&M_ADC.M1,&M_ADC.M2,&M_ADC.M3,&M_ADC.M4);
+            STM_LOG("T","TCP","read %s",Read_data); 
+            controlMotor(M1,M_ADC.M1);
+            controlMotor(M2,M_ADC.M2);
+            controlMotor(M3,M_ADC.M3);
+            controlMotor(M4,M_ADC.M4);
+        }
+        if((strstr((char*)Read_data,"[WIFI]")!=NULL)){//当接受到[WIFI]命令时控制ESP32切换WIFI AP
+            ESP_ERROR_LOG(ESP_AT(100,"AT+CWQAP\r\n"));
+            sscanf((char*)Read_data,"+IPD,%u,%u:[WII]%s %s %s %s %s",
+            &WIFITCP.ID,
+            &WIFITCP.Data,
+            WIFITCP.SSID,
+            WIFITCP.password,
+            WIFITCP.ip,
+            WIFITCP.types,
+            WIFITCP.port
+            );
+            WIFI_Connection(WIFITCP);
+        }
+    }
 }
 
 
@@ -577,5 +774,81 @@ void USART1_IRQHandler(void) {
             // 重置 tx_Number 为 0，准备处理下一条数据
             tx_Number = 0;
             break;
+    }
+}
+
+/**
+ * @brief TIM4中断处理函数控制M1的PWM 
+ * 
+*/
+void TIM4_IRQHandler(void)
+{
+    if (TIM_GetITStatus(TIM4,TIM_IT_Update) == SET)
+    {
+        TIME1++;
+	    if(TIME1>=100)
+	    TIME1=0;
+	    if(TIME1<=PWM_ADC1){
+        M1CMDON;}
+        else 
+        M1CMDOFF;
+        TIM_ClearITPendingBit(TIM4,TIM_FLAG_Update);
+    }
+}
+
+/**
+ * @brief TIM5中断处理函数控制M2的PWM 
+ * 
+*/
+void TIM5_IRQHandler(void)
+{
+    if (TIM_GetITStatus(TIM5,TIM_IT_Update) == SET)
+    {
+        TIME2++;
+	    if(TIME2>=100)
+	    TIME2=0;
+	    if(TIME2<=PWM_ADC2){
+        M2CMDON;}
+        else 
+        M2CMDOFF;
+        TIM_ClearITPendingBit(TIM5,TIM_FLAG_Update);
+    }
+}
+
+/**
+ * @brief TIM6中断处理函数控制M3的PWM 
+ * 
+*/
+void TIM6_IRQHandler(void)
+{
+    if (TIM_GetITStatus(TIM6,TIM_IT_Update) == SET)
+    {
+        TIME3++;
+	    if(TIME3>=100)
+	    TIME3=0;
+	    if(TIME3<=PWM_ADC3){
+        M3CMDON;}
+        else 
+        M3CMDOFF;
+        TIM_ClearITPendingBit(TIM6,TIM_FLAG_Update);
+    }
+}
+
+/**
+ * @brief TIM7中断处理函数控制M4的PWM 
+ * 
+*/
+void TIM7_IRQHandler(void)
+{
+    if (TIM_GetITStatus(TIM7,TIM_IT_Update) == SET)
+    {
+        TIME4++;
+	    if(TIME4>=100)
+	    TIME4=0;
+	    if(TIME4<=PWM_ADC4){
+        M4CMDON;}
+        else 
+        M4CMDOFF;
+        TIM_ClearITPendingBit(TIM7,TIM_FLAG_Update);
     }
 }
